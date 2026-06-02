@@ -1907,6 +1907,19 @@
               </div>
             </div>
           </div>
+
+          <div class="setting-row" style="margin-top:12px">
+            <div class="setting-label-group">
+              <div class="setting-label">Starting HYSA Balance</div>
+              <div class="setting-desc">Opening HYSA balance for the year</div>
+            </div>
+            <div class="setting-control">
+              <div class="input-wrap has-prefix" style="width:130px;max-width:100%">
+                <span class="prefix">$</span>
+                <input type="number" id="cfg-hysa" step="0.01" value="0.00"/>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Pay Schedule -->
@@ -2150,7 +2163,7 @@ const uid = () => ++nextId;
 const fmt = n => '$' + (n||0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,',');
 
 function buildInitial() {
-  const cfg = { year:2026, payFreq:'biweekly', payDow:5, anchorDate:'2026-01-02', customDays:'', savingsBalance:7463.81 };
+  const cfg = { year:2026, payFreq:'biweekly', payDow:5, anchorDate:'2026-01-02', customDays:'', savingsBalance:7463.81, hysaBalance:0 };
   const payDays = calcPayDays(cfg);
   const months = {};
   MONTHS.forEach(m => {
@@ -2169,6 +2182,7 @@ function buildInitial() {
     cards:   DEF_CARDS.map(c => ({...c, expenses: c.expenses.map(e=>({...e}))})),
     venture: DEF_VENTURE.map(b => ({...b})),
     savingsBalance: 7463.81,
+      hysaBalance: 0,
     cfg, activeCardId: 50,
     goals: [
       { id:uid(), name:'Emergency Fund',  emoji:'🛡️', target:10000, account:'both',    note:'3 months of expenses' },
@@ -2247,7 +2261,8 @@ function _idbDelete(key) {
 
 // ── Migrate a raw state object (validation + field additions) ──
 function _migrateState(s) {
-  if (!s.cfg) s.cfg = { year:2026, payFreq:'biweekly', payDow:5, anchorDate:'2026-01-02', customDays:'', savingsBalance: s.savingsBalance||7463.81 };
+  if (!s.cfg) s.cfg = { year:2026, payFreq:'biweekly', payDow:5, anchorDate:'2026-01-02', customDays:'', savingsBalance: s.savingsBalance||7463.81, hysaBalance: s.hysaBalance||0 };
+  if (s.cfg.hysaBalance === undefined) s.cfg.hysaBalance = 0;
   if (!s.cards) {
     s.cards = [{ id:50, name:"Venture Card", type:"Capital One Rewards", limit:0, color:0, expenses: (s.venture||DEF_VENTURE).map(e=>({...e})) }];
     s.activeCardId = 50;
@@ -2517,7 +2532,7 @@ function renderDashboard() {
     kpiCard('Total Year Income',   fmt(totInc),              'All paychecks',        'rgba(139,109,255,0.14)') +
     kpiCard('Total Year Bills',    fmt(totBill),             'All paid bills',        'rgba(255,107,138,0.14)') +
     kpiCard('Savings Account',      fmt(totManual),           'Direct transfers',      'rgba(63,255,200,0.1)')   +
-    kpiCard('HYSA Contributions',  fmt(totHysa),             'High-yield savings',    'rgba(92,196,252,0.14)')  +
+    kpiCard('HYSA Balance',  fmt((STATE.cfg?.hysaBalance||0)+totHysa), 'High-yield savings',    'rgba(92,196,252,0.14)')  +
     kpiCard('Total Saved',         fmt(totSave),             'Savings + HYSA',         'rgba(180,140,255,0.14)')+
     kpiCard('Projected Balance',   fmt(projBal),             'Est. end-of-year',      'rgba(255,179,71,0.14)');
 
@@ -4032,11 +4047,11 @@ function renderSavings() {
     const md=STATE.months[x.m]; return s+md.weeks.reduce((ws,w)=>ws+(+w.manualSave||0),0);
   },0);
   const totPulled = sums.reduce((s,x)=>s+(x.pulled||0),0);
-  const proj = STATE.savingsBalance + totHysa + totManual - totPulled;
+  const proj = STATE.savingsBalance + (STATE.cfg?.hysaBalance||0) + totHysa + totManual - totPulled;
 
   document.getElementById('savings-kpis').innerHTML =
     kpiCard('Starting Balance', fmt(STATE.savingsBalance), '2026 opening', 'rgba(255,179,71,0.14)') +
-    kpiCard('HYSA Saved',       fmt(totHysa),   'High-yield transfers', 'rgba(92,196,252,0.14)') +
+    kpiCard('HYSA Balance',     fmt((STATE.cfg?.hysaBalance||0)+totHysa), 'High-yield transfers + starting', 'rgba(92,196,252,0.14)') +
     kpiCard('Savings Account',     fmt(totManual), 'Direct transfers', 'rgba(63,255,200,0.1)') +
     kpiCard('Withdrawn',        fmt(totPulled), 'Pulled out', 'rgba(255,107,138,0.14)') +
     kpiCard('Projected Balance',fmt(proj),      'End of 2026', 'rgba(139,109,255,0.14)');
@@ -4794,7 +4809,7 @@ function getAccountBalances() {
   const startBal  = STATE.savingsBalance || 0;
 
   // HYSA grows from contributions; Savings Account starts from opening balance + manual saves - withdrawals
-  const hysaBal    = totHysa;
+  const hysaBal    = (STATE.cfg?.hysaBalance||0) + totHysa;
   const savingsBal = startBal + totManual - totPulled;
   const bothBal    = hysaBal + savingsBal;
   return { hysa: Math.max(0, hysaBal), savings: Math.max(0, savingsBal), both: Math.max(0, bothBal) };
@@ -4822,7 +4837,7 @@ function renderGoals() {
     <div class="goals-account-card" style="background:linear-gradient(135deg,#0d4a3a,#1b6e55);flex:1;min-width:180px">
       <div class="gac-label">Savings Account</div>
       <div class="gac-amount">${fmt(balances.savings)}</div>
-      <div class="gac-sub">Starting ${fmt(STATE.savingsBalance)} + contributions</div>
+      <div class="gac-sub">Starting ${fmt((STATE.cfg?.hysaBalance||0))} + contributions</div>
     </div>
     <div class="goals-account-card" style="background:linear-gradient(135deg,#3a0ca3,#5c1fc4);flex:1;min-width:180px">
       <div class="gac-label">Combined Total</div>
@@ -5173,6 +5188,7 @@ function renderSettings() {
   const cfg = STATE.cfg || {};
   document.getElementById('cfg-year').value     = cfg.year || 2026;
   document.getElementById('cfg-savings').value  = cfg.savingsBalance || STATE.savingsBalance || 7463.81;
+  if (document.getElementById('cfg-hysa')) document.getElementById('cfg-hysa').value = cfg.hysaBalance ?? 0;
   document.getElementById('cfg-freq').value     = cfg.payFreq || 'biweekly';
   document.getElementById('cfg-anchor').value   = cfg.anchorDate || ((cfg.year||2026)+'-01-02');
   document.getElementById('cfg-custom-days').value = cfg.customDays || '';
@@ -5214,6 +5230,7 @@ function readCfgFromForm() {
   return {
     year:          parseInt(document.getElementById('cfg-year').value) || 2026,
     savingsBalance:parseFloat(document.getElementById('cfg-savings').value) || 0,
+    hysaBalance:parseFloat(document.getElementById('cfg-hysa')?.value) || 0,
     payFreq:       document.getElementById('cfg-freq').value,
     payDow:        getActiveDow(),
     anchorDate:    document.getElementById('cfg-anchor').value,
@@ -5240,6 +5257,7 @@ function applySettings() {
   const cfg   = readCfgFromForm();
   STATE.cfg   = cfg;
   STATE.savingsBalance = cfg.savingsBalance;
+  STATE.cfg.hysaBalance = cfg.hysaBalance;
   STATE.months = rebuildMonths(cfg);
   saveState();
   // Update title/sub throughout
