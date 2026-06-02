@@ -1136,9 +1136,76 @@
     .nw-cols, .goals-grid, .settings-grid, .ap-grid { grid-template-columns: 1fr !important; }
     #cc-layout { grid-template-columns: 1fr !important; }
     .input-grid { grid-template-columns: 1fr 1fr !important; }
-    .payday-month-block { overflow-x: auto; }
-    .payday-table { font-size: 12px; }
-    .pd-input { width: 84px; }
+    /* ── PAYDAY: card layout on mobile ── */
+    .payday-month-block { overflow-x: unset; }
+    .payday-month-header { flex-wrap: wrap; gap: 8px; padding: 12px 14px; }
+    .pmh-totals { gap: 12px; flex-wrap: wrap; }
+
+    /* Hide the table header on mobile */
+    .payday-table thead { display: none; }
+
+    /* Turn each row into a card */
+    .payday-table tbody tr {
+      display: block;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 16px;
+      margin-bottom: 10px;
+    }
+    .payday-table tbody tr:hover { background: var(--bg2); }
+    .payday-table tbody tr:last-child td { border-bottom: none; }
+
+    /* Each cell becomes a labeled row inside the card */
+    .payday-table td {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 0;
+      border: none;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+    .payday-table td:last-child { border-bottom: none; padding-bottom: 0; }
+    .payday-table td:first-child { border-top: none; padding-top: 0; border-left: none; }
+    .payday-table td:first-child,
+    .payday-table td:last-child { border-left: none; border-right: none; }
+
+    /* Inject labels via data-label attributes (set in renderPaydayTable) */
+    .payday-table td[data-label]::before {
+      content: attr(data-label);
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--muted2);
+      text-transform: uppercase;
+      letter-spacing: 0.9px;
+      font-family: 'IBM Plex Mono', monospace;
+      flex-shrink: 0;
+      margin-right: 12px;
+    }
+
+    /* Make inputs full-width inside their cell */
+    .payday-table td .pd-input-wrap { flex: 1; max-width: 200px; }
+    .payday-table td .pd-input { width: 100%; min-width: 0; }
+
+    /* Date cell — prominent header for the card */
+    .payday-table td.pd-date-cell {
+      font-size: 14px !important;
+      border-bottom: 1px solid var(--border2) !important;
+      padding-bottom: 10px !important;
+      margin-bottom: 2px;
+    }
+    .payday-table td.pd-date-cell::before { display: none; }
+
+    /* Take-home net value */
+    .payday-table td.pd-net-cell { font-size: 15px; font-weight: 800; }
+
+    /* Delete button cell — align right, no label */
+    .payday-table td:last-child { justify-content: flex-end; padding-top: 10px; }
+    .payday-table td:last-child::before { display: none; }
+
+    /* Pulled-from-savings column if present */
+    .payday-table td[data-label="Pulled"] { }
     .panel { padding: 12px 12px; }
     .bill-mgr-row, .venture-row, .nw-add-row { flex-wrap: wrap; gap: 8px; }
     .debt-stats { gap: 8px; }
@@ -4206,8 +4273,8 @@ function renderPayday() {
       const netCol = net >= 0 ? '#a3f5d1' : '#ff6b8a';
       const dateStr = `${FULLMON[monthIdx]} ${w.payDay}, ${yr}`;
       return `<tr id="pdrow-${m}-${wi}">
-        <td class="pd-date-cell">${dateStr}</td>
-        <td>
+        <td class="pd-date-cell" data-label="Payday">${dateStr}</td>
+        <td data-label="Paycheck">
           <div class="pd-input-wrap paycheck">
             <span class="prefix">$</span>
             <input class="pd-input" type="number" step="0.01" min="0"
@@ -4216,7 +4283,7 @@ function renderPayday() {
               oninput="livePaydayNet('${m}',${wi})"/>
           </div>
         </td>
-        <td>
+        <td data-label="HYSA">
           <div class="pd-input-wrap hysa">
             <span class="prefix">$</span>
             <input class="pd-input" type="number" step="0.01" min="0"
@@ -4225,7 +4292,7 @@ function renderPayday() {
               oninput="livePaydayNet('${m}',${wi})"/>
           </div>
         </td>
-        <td>
+        <td data-label="Savings">
           <div class="pd-input-wrap savings">
             <span class="prefix">$</span>
             <input class="pd-input" type="number" step="0.01" min="0"
@@ -4234,7 +4301,7 @@ function renderPayday() {
               oninput="livePaydayNet('${m}',${wi})"/>
           </div>
         </td>
-        <td class="pd-net-cell" id="pdnet-${m}-${wi}" style="color:${netCol}">${fmt(net)}</td>
+        <td class="pd-net-cell" data-label="Take-Home" id="pdnet-${m}-${wi}" style="color:${netCol}">${fmt(net)}</td>
         <td>
           <button class="pd-del-btn" onclick="deletePayday('${m}',${wi})" title="Remove this payday">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
