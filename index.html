@@ -5197,8 +5197,19 @@ function removeNWItem(type,idx){
 // ═══════════════════════════════════════════
 //  DEBT PAYOFF
 // ═══════════════════════════════════════════
+function populateDebtBillDropdowns() {
+  const bills = STATE.bills || [];
+  const opts = '<option value="">— None —</option>' +
+    bills.map(b => `<option value="${b.id}">${b.emoji||'📋'} ${b.name} (${fmt(b.amount||0)})</option>`).join('');
+  const billSel = document.getElementById('new-debt-bill');
+  const principalSel = document.getElementById('new-debt-principal');
+  if (billSel) billSel.innerHTML = opts;
+  if (principalSel) principalSel.innerHTML = opts;
+}
+
 function renderDebts() {
   if (!STATE.debts) STATE.debts=[];
+  populateDebtBillDropdowns();
   const totalDebt=STATE.debts.reduce((s,d)=>s+(+d.balance||0),0);
   const totalMin=STATE.debts.reduce((s,d)=>s+(+d.minPayment||0),0);
   document.getElementById('debt-kpis').innerHTML =
@@ -5238,19 +5249,7 @@ function renderDebts() {
     </div>`;
   }).join('');
 }
-function addDebt(){
-  const name=document.getElementById('new-debt-name').value.trim();
-  const bal=parseFloat(document.getElementById('new-debt-bal').value)||0;
-  const min=parseFloat(document.getElementById('new-debt-min').value)||0;
-  const rate=parseFloat(document.getElementById('new-debt-rate').value)||0;
-  const emoji=document.getElementById('new-debt-emoji').value||'💳';
-  if(!name||!bal)return;
-  if(!STATE.debts)STATE.debts=[];
-  STATE.debts.push({id:uid(),name,balance:bal,origBalance:bal,minPayment:min,rate,emoji});
-  ['new-debt-name','new-debt-bal','new-debt-min','new-debt-rate','new-debt-emoji'].forEach(id=>{document.getElementById(id).value='';});
-  saveState();renderDebts();
-}
-function removeDebt(i){STATE.debts.splice(i,1);saveState();renderDebts();}
+// addDebt and removeDebt defined above (line ~3201) — duplicates removed
 function editDebtBalance(i){
   const d=STATE.debts[i];if(!d)return;
   const card=document.getElementById('debt-card-'+i);if(!card)return;
