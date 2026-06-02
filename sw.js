@@ -1,10 +1,10 @@
 // ═══════════════════════════════════════════
-//  Budget Me — Service Worker v2
+//  Budget Me — Service Worker v3
 //  Bump CACHE_NAME version to bust old cache
 // ═══════════════════════════════════════════
 
-const CACHE_NAME = 'budgetme-v2';  // ← bumped from v1 to force cache refresh
-const RUNTIME_CACHE = 'budgetme-runtime-v2';
+const CACHE_NAME = 'budgetme-v3';  // ← bumped from v1 to force cache refresh
+const RUNTIME_CACHE = 'budgetme-runtime-v3';
 
 const PRECACHE_URLS = [
   './',
