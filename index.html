@@ -2438,7 +2438,7 @@ function switchMonth(m, btn) {
   document.querySelectorAll('.month-tab').forEach(t => t.classList.remove('active'));
   btn.classList.add('active');
   renderMonthly();
-  document.getElementById('page-title').textContent = FULLMON[MONTHS.indexOf(m)] + ' 2026';
+  document.getElementById('page-title').textContent = FULLMON[MONTHS.indexOf(m)] + ' ' + (STATE.cfg?.year||2026);
 }
 
 function renderMonthly() {
@@ -3039,13 +3039,15 @@ function resetCardBill(id) {
 function saveBill(id) {
   id = +id;
   const b = STATE.bills.find(x=>+x.id===id); if (!b) return;
+  const oldName    = b.name; // capture before overwriting
   const name       = document.getElementById('en-'+id).value;
   const amount     = parseFloat(document.getElementById('ea-'+id).value)||0;
   const day        = parseInt(document.getElementById('ed-'+id).value)||1;
   const recurrence = document.getElementById('er-'+id).value || 'monthly';
   b.name = name; b.amount = amount; b.day = day; b.recurrence = recurrence;
   MONTHS.forEach(m => STATE.months[m].weeks.forEach(w => {
-    const wb = w.bills.find(x=>x.name===b.name||+x.id===id);
+    // Match by old name OR by id to correctly find week copies
+    const wb = w.bills.find(x=>x.name===oldName||+x.id===id);
     if (wb) { wb.name=name; wb.amount=amount; wb.day=day; wb.recurrence=recurrence; }
   }));
   saveState(); renderBills();
@@ -3284,41 +3286,7 @@ function editDebtBalance(i){
   setTimeout(()=>document.getElementById('debt-nn-'+i)?.focus(),30);
 }
 
-function toggleDebtEditIconPicker(i){
-  const dd=document.getElementById('debt-edit-icon-dd-'+i);
-  const btn=document.getElementById('debt-edit-icon-btn-'+i);
-  const isOpen=dd.classList.contains('open');
-  dd.classList.toggle('open',!isOpen);
-  btn.classList.toggle('open',!isOpen);
-  if(!isOpen){buildDebtEditIconGrid(i);setTimeout(()=>document.getElementById('debt-edit-icon-search-'+i)?.focus(),50);}
-}
-function filterDebtEditIcons(i){
-  buildDebtEditIconGrid(i,document.getElementById('debt-edit-icon-search-'+i)?.value||'');
-}
-function buildDebtEditIconGrid(i,filter=''){
-  const q=filter.toLowerCase();
-  const grid=document.getElementById('debt-edit-icon-grid-'+i);if(!grid)return;
-  const current=document.getElementById('debt-ne-'+i)?.value||'💳';
-  let html='';
-  DEBT_ICON_CATEGORIES.forEach(cat=>{
-    const icons=q?cat.icons.filter(ic=>ic.includes(q)||cat.label.toLowerCase().includes(q)):cat.icons;
-    if(!icons.length)return;
-    html+=`<div class="debt-icon-category">${cat.label}</div><div class="debt-icon-row">`;
-    icons.forEach(ic=>{
-      html+=`<button type="button" class="debt-icon-opt${ic===current?' selected':''}" onmousedown="event.stopPropagation();pickDebtEditIcon(${i},'${ic}')">${ic}</button>`;
-    });
-    html+='</div>';
-  });
-  if(!html)html='<div style="padding:14px 8px;color:var(--muted);font-size:12px;font-family:IBM Plex Mono,monospace">No icons found</div>';
-  grid.innerHTML=html;
-}
-function pickDebtEditIcon(i,ic){
-  document.getElementById('debt-ne-'+i).value=ic;
-  document.getElementById('debt-edit-icon-preview-'+i).textContent=ic;
-  document.getElementById('debt-edit-icon-dd-'+i).classList.remove('open');
-  document.getElementById('debt-edit-icon-btn-'+i).classList.remove('open');
-  buildDebtEditIconGrid(i);
-}
+// toggleDebtEditIconPicker, filterDebtEditIcons, buildDebtEditIconGrid, pickDebtEditIcon — defined above via portal
 
 function saveDebtBalance(i){
   const name=document.getElementById('debt-nn-'+i)?.value.trim();
@@ -3354,8 +3322,36 @@ function importBackup(input){
     try{
       const data=JSON.parse(e.target.result);
       if(!data.months||!data.bills)throw new Error('invalid');
-      localStorage.setItem('bm2026',JSON.stringify(data));location.reload();
-    }catch{alert('Invalid backup file.');}
+      localStorage.setItem('bm2026',JSON.stringify(data));
+      // location.reload() blocked in sandboxed iframes — rebuild state in-place
+      STATE = loadState();
+      nextId = 200;
+      (function syncId(){
+        const allIds=[];
+        STATE.bills.forEach(b=>allIds.push(+b.id));
+        (STATE.goals||[]).forEach(g=>allIds.push(+g.id));
+        (STATE.debts||[]).forEach(d=>allIds.push(+d.id));
+        MONTHS.forEach(m=>(STATE.months[m]?.weeks||[]).forEach(w=>{allIds.push(+w.id);w.bills.forEach(b=>allIds.push(+b.id));}));
+        const mx=allIds.filter(x=>isFinite(x)).reduce((a,b)=>Math.max(a,b),200);
+        if(mx>nextId)nextId=mx;
+      })();
+      syncCardBills();
+      showPage('dashboard', document.querySelector('.nav-item'));
+      document.querySelectorAll('.nav-item').forEach((n,i) => n.classList.toggle('active', i===0));
+      renderDashboard();
+      populateDebtBillDropdowns();
+    }catch{
+      const m=document.createElement('div');
+      m.className='modal-overlay';
+      m.innerHTML=`<div class="modal-box" style="max-width:380px;text-align:center">
+        <div style="font-size:32px;margin-bottom:12px">⚠️</div>
+        <div class="modal-title" style="color:var(--coral)">Invalid Backup File</div>
+        <p style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.6">This doesn't appear to be a valid Budget Me backup. Please use a .json file exported from this app.</p>
+        <button class="btn btn-primary" onclick="this.closest('.modal-overlay').remove()">OK</button>
+      </div>`;
+      m.addEventListener('click',e=>{if(e.target===m)m.remove();});
+      document.body.appendChild(m);
+    }
   };
   reader.readAsText(file);
 }
@@ -3373,9 +3369,43 @@ function exportCSV(){
   a.download=`BudgetMe_${yr}.csv`;a.click();
 }
 function clearAllData(){
-  if(!confirm('⚠️ Delete ALL budget data permanently?'))return;
-  if(!confirm('Last chance — this cannot be undone!'))return;
-  localStorage.removeItem('bm2026');localStorage.removeItem('bm2026-last-reset');localStorage.removeItem('bm2026-debt-processed');localStorage.removeItem('bm2026-stmt-processed');location.reload();
+  // confirm() blocked in sandboxed iframes — use inline modal
+  const existing = document.getElementById('clear-data-modal');
+  if (existing) { existing.remove(); return; }
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.id = 'clear-data-modal';
+  modal.innerHTML = `
+    <div class="modal-box" style="max-width:400px;text-align:center">
+      <div style="font-size:36px;margin-bottom:12px">⚠️</div>
+      <div class="modal-title" style="color:var(--coral)">Delete ALL Data?</div>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.6">This will permanently erase all your bills, paychecks, savings, and settings. This cannot be undone.</p>
+      <div style="display:flex;gap:10px;justify-content:center">
+        <button class="btn btn-danger" onclick="confirmClearAllData()">Yes, Delete Everything</button>
+        <button class="btn btn-cancel" onclick="document.getElementById('clear-data-modal').remove()">Cancel</button>
+      </div>
+    </div>`;
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  document.body.appendChild(modal);
+}
+
+function confirmClearAllData(){
+  try {
+    localStorage.removeItem('bm2026');
+    localStorage.removeItem('bm2026-last-reset');
+    localStorage.removeItem('bm2026-debt-processed');
+    localStorage.removeItem('bm2026-stmt-processed');
+  } catch(e) {}
+  // location.reload() blocked in sandboxed iframes — rebuild state in-place
+  STATE = buildInitial();
+  nextId = 200;
+  syncCardBills();
+  const modal = document.getElementById('clear-data-modal');
+  if (modal) modal.remove();
+  showPage('dashboard', document.querySelector('.nav-item'));
+  document.querySelectorAll('.nav-item').forEach((n,i) => n.classList.toggle('active', i===0));
+  renderDashboard();
+  populateDebtBillDropdowns();
 }
 
 // ═══════════════════════════════════════════
@@ -3759,21 +3789,41 @@ function addBill() {
   const amount     = parseFloat(document.getElementById('new-bill-amount').value)||0;
   const day        = parseInt(document.getElementById('new-bill-day').value)||1;
   const recurrence = document.getElementById('new-bill-recurrence').value || 'monthly';
+  const emoji      = document.getElementById('new-bill-emoji')?.value || '📋';
   if (!name || !amount) return;
-  const bill = { id:uid(), name, amount, day, autoPay:false, recurrence };
+  const bill = { id:uid(), name, amount, day, autoPay:false, recurrence, emoji };
   STATE.bills.push(bill);
   MONTHS.forEach(m => STATE.months[m].weeks.forEach(w => w.bills.push({ ...bill, id:uid(), paid:false })));
   document.getElementById('new-bill-name').value = '';
   document.getElementById('new-bill-amount').value = '';
   document.getElementById('new-bill-day').value = '';
   document.getElementById('new-bill-recurrence').value = 'monthly';
+  // Reset icon picker back to default
+  const emojiEl = document.getElementById('new-bill-emoji');
+  const previewEl = document.getElementById('bill-icon-preview');
+  if (emojiEl) emojiEl.value = '📋';
+  if (previewEl) previewEl.textContent = '📋';
   saveState(); renderBills();
 }
 
 function removeBill(id) {
-  const b = STATE.bills.find(x=>x.id===id);
-  if (!b || !confirm(`Remove "${b.name}"?`)) return;
-  STATE.bills = STATE.bills.filter(x=>x.id!==id);
+  id = +id;
+  const b = STATE.bills.find(x=>+x.id===id); if (!b) return;
+  const row = document.getElementById('bmrow-'+id); if (!row) return;
+  // Inline confirm — confirm() is blocked in sandboxed iframes
+  row.outerHTML = `<div class="edit-row" id="bmrow-${id}" style="align-items:center;gap:12px;border-color:rgba(255,85,119,0.35);background:rgba(255,85,119,0.06)">
+    <span style="font-size:20px">${b.emoji||'📋'}</span>
+    <span style="flex:1;font-size:13px;font-weight:600;color:var(--text)">Delete <strong>${b.name}</strong>?</span>
+    <span style="font-size:11px;color:var(--muted);font-family:'IBM Plex Mono',monospace">This cannot be undone.</span>
+    <button class="btn btn-danger btn-sm" onclick="confirmRemoveBill(${id})">Yes, Delete</button>
+    <button class="btn btn-cancel btn-sm" onclick="renderBills()">Cancel</button>
+  </div>`;
+}
+
+function confirmRemoveBill(id) {
+  id = +id;
+  const b = STATE.bills.find(x=>+x.id===id); if (!b) return;
+  STATE.bills = STATE.bills.filter(x=>+x.id!==id);
   MONTHS.forEach(m => STATE.months[m].weeks.forEach(w => { w.bills = w.bills.filter(x=>x.name!==b.name); }));
   saveState(); renderBills();
 }
@@ -4184,7 +4234,11 @@ function addCard() {
   const name  = document.getElementById('new-card-name').value.trim();
   const type  = document.getElementById('new-card-type').value.trim();
   const limit = parseFloat(document.getElementById('new-card-limit').value)||0;
-  if (!name) { alert('Please enter a card name.'); return; }
+  if (!name) {
+    const m=document.createElement('div');m.className='modal-overlay';
+    m.innerHTML=`<div class="modal-box" style="max-width:340px;text-align:center"><div style="font-size:28px;margin-bottom:10px">⚠️</div><div class="modal-title">Card Name Required</div><p style="font-size:13px;color:var(--muted);margin:12px 0 20px">Please enter a name for the card.</p><button class="btn btn-primary" onclick="this.closest('.modal-overlay').remove()">OK</button></div>`;
+    m.addEventListener('click',e=>{if(e.target===m)m.remove();});document.body.appendChild(m);return;
+  }
   const card = { id:uid(), name, type:type||'Credit Card', limit, color:newCardColorIdx, expenses:[] };
   STATE.cards.push(card);
   STATE.activeCardId = card.id;
@@ -4202,9 +4256,31 @@ function removeCard(id) {
   if (!card) return;
   const expCount = (card.expenses||[]).length;
   const msg = expCount > 0
-    ? `Delete "${card.name}" and its ${expCount} expense${expCount!==1?'s':''}? This will also remove the auto-generated bill.`
-    : `Delete "${card.name}"?`;
-  if (!confirm(msg)) return;
+    ? `Delete <strong>${card.name}</strong> and its ${expCount} expense${expCount!==1?'s':''}? This will also remove the auto-generated bill.`
+    : `Delete <strong>${card.name}</strong>?`;
+  // confirm() blocked in sandboxed iframes — use inline modal
+  const existing = document.getElementById('remove-card-modal');
+  if (existing) existing.remove();
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.id = 'remove-card-modal';
+  modal.innerHTML = `
+    <div class="modal-box" style="max-width:400px;text-align:center">
+      <div style="font-size:32px;margin-bottom:12px">💳</div>
+      <div class="modal-title" style="color:var(--coral)">Remove Card?</div>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.6">${msg}</p>
+      <div style="display:flex;gap:10px;justify-content:center">
+        <button class="btn btn-danger" onclick="confirmRemoveCard(${id})">Yes, Delete</button>
+        <button class="btn btn-cancel" onclick="document.getElementById('remove-card-modal').remove()">Cancel</button>
+      </div>
+    </div>`;
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  document.body.appendChild(modal);
+}
+
+function confirmRemoveCard(id) {
+  const existing = document.getElementById('remove-card-modal');
+  if (existing) existing.remove();
   STATE.cards = STATE.cards.filter(c=>c.id!==id);
   if (STATE.activeCardId === id) STATE.activeCardId = STATE.cards[0]?.id;
   syncCardBills();
@@ -4428,7 +4504,21 @@ function deletePayday(m, wi) {
   if (!STATE.months[m]?.weeks[wi]) return;
   const w = STATE.months[m].weeks[wi];
   const yr = (STATE.cfg && STATE.cfg.year) || 2026;
-  if (!confirm(`Remove payday on ${FULLMON[MONTHS.indexOf(m)]} ${w.payDay}, ${yr}?`)) return;
+  const rowId = `pdrow-${m}-${wi}`;
+  const row = document.getElementById(rowId); if (!row) return;
+  const dateStr = `${FULLMON[MONTHS.indexOf(m)]} ${w.payDay}, ${yr}`;
+  // Replace row with inline confirm
+  row.innerHTML = `<td colspan="6" style="padding:10px 14px">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <span style="font-size:13px;color:var(--text)">Remove payday <strong>${dateStr}</strong>?</span>
+      <button class="btn btn-danger btn-sm" onclick="confirmDeletePayday('${m}',${wi})">Yes, Remove</button>
+      <button class="btn btn-cancel btn-sm" onclick="renderPayday()">Cancel</button>
+    </div>
+  </td>`;
+}
+
+function confirmDeletePayday(m, wi) {
+  if (!STATE.months[m]?.weeks[wi]) return;
   STATE.months[m].weeks.splice(wi, 1);
   saveState();
   renderPayday();
@@ -5158,6 +5248,113 @@ function renderDebts() {
   }).join('');
 }
 // addDebt, removeDebt, editDebtBalance, saveDebtBalance defined above — duplicates removed
+
+// ═══════════════════════════════════════════
+//  DEBT PROJECTION
+// ═══════════════════════════════════════════
+function renderDebtProjection() {
+  const el = document.getElementById('debt-proj-results');
+  if (!el) return;
+
+  const dateVal = document.getElementById('debt-proj-date')?.value;
+  if (!dateVal) {
+    el.innerHTML = '<div class="debt-proj-empty">Pick a future date above to see projected balances.</div>';
+    return;
+  }
+
+  const targetDate = new Date(dateVal + 'T12:00:00');
+  const today      = new Date();
+  today.setHours(0,0,0,0);
+
+  if (targetDate <= today) {
+    el.innerHTML = '<div class="debt-proj-empty" style="color:var(--coral)">Please pick a future date.</div>';
+    return;
+  }
+
+  const mode = document.getElementById('debt-proj-mode')?.value || 'every';
+
+  // Calculate months between today and target date
+  const monthsAhead = (targetDate.getFullYear() - today.getFullYear()) * 12
+                    + (targetDate.getMonth() - today.getMonth());
+
+  if (!STATE.debts || !STATE.debts.length) {
+    el.innerHTML = '<div class="debt-proj-empty">No debts tracked yet.</div>';
+    return;
+  }
+
+  const results = STATE.debts.map(d => {
+    if (!d.balance || d.balance <= 0) {
+      return { d, projBal: 0, interestPaid: 0, paidOff: true, monthsPaidOff: 0 };
+    }
+
+    let bal          = d.balance;
+    let interestPaid = 0;
+    let paidOffMonth = null;
+    const mr         = (d.rate || 0) / 100 / 12;
+    const payment    = d.minPayment || 0;
+
+    for (let mo = 1; mo <= monthsAhead; mo++) {
+      if (bal <= 0) break;
+
+      // Accrue interest
+      const interest = bal * mr;
+      interestPaid  += interest;
+      bal           += interest;
+
+      // Apply payment based on mode
+      const shouldPay = mode === 'every' || (mode === 'autopay' && d.linkedBillId &&
+        STATE.bills.find(b => +b.id === +d.linkedBillId)?.autoPay);
+
+      if (shouldPay && payment > 0) {
+        bal = Math.max(0, bal - payment);
+      }
+
+      if (bal <= 0 && paidOffMonth === null) paidOffMonth = mo;
+    }
+
+    bal = Math.max(0, parseFloat(bal.toFixed(2)));
+    const paidOff = bal === 0;
+    return { d, projBal: bal, interestPaid: parseFloat(interestPaid.toFixed(2)), paidOff, monthsPaidOff: paidOffMonth };
+  });
+
+  const months = monthsAhead;
+  const dateLabel = targetDate.toLocaleDateString('en-US', { month:'long', day:'numeric', year:'numeric' });
+
+  el.innerHTML = `
+    <div class="debt-proj-results">
+    <div style="font-size:11px;color:var(--muted);font-family:'IBM Plex Mono',monospace;margin-bottom:4px;grid-column:1/-1">
+      Projected balances on <strong style="color:var(--purple2)">${dateLabel}</strong>
+      — ${months} month${months!==1?'s':''} from now
+    </div>
+      ${results.map(({ d, projBal, interestPaid, paidOff, monthsPaidOff }) => {
+        const orig    = d.origBalance || d.balance;
+        const paid    = Math.max(0, orig - projBal);
+        const pct     = orig > 0 ? Math.min(100, (paid / orig) * 100) : 100;
+        const reduction = d.balance - projBal;
+        return `<div class="debt-proj-card${paidOff ? ' paid-off' : ''}">
+          <div class="debt-proj-card-header">
+            <span class="debt-proj-emoji">${d.emoji || '💳'}</span>
+            <span class="debt-proj-name">${d.name}</span>
+            <span class="debt-proj-bal" style="color:${paidOff ? 'var(--teal)' : 'var(--coral)'}">
+              ${paidOff ? '✓ Paid Off!' : fmt(projBal)}
+            </span>
+          </div>
+          <div class="debt-proj-bar-track">
+            <div class="debt-proj-bar-fill" style="width:${pct.toFixed(1)}%;background:${paidOff?'linear-gradient(90deg,var(--teal),#00b894)':'linear-gradient(90deg,var(--purple),var(--sky))'}"></div>
+          </div>
+          <div class="debt-proj-stats">
+            <div class="debt-proj-stat">Now: <strong>${fmt(d.balance)}</strong></div>
+            ${paidOff
+              ? `<div class="debt-proj-stat">Paid off in: <strong style="color:var(--teal)">${monthsPaidOff} mo</strong></div>`
+              : `<div class="debt-proj-stat">Reduced by: <strong style="color:var(--teal)">${fmt(reduction)}</strong></div>`
+            }
+            <div class="debt-proj-stat">Interest: <strong style="color:var(--amber)">${fmt(interestPaid)}</strong></div>
+            <div class="debt-proj-stat">Progress: <strong>${pct.toFixed(1)}%</strong></div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
 
 // Keep mobile nav in sync when pages change
 // BOOT
