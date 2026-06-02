@@ -1814,8 +1814,8 @@
             </div>
             <input type="hidden" id="new-debt-emoji" value="💳"/>
           </div>
-          <div class="input-group" style="min-width:150px"><label>Linked Bill <span style="font-weight:400;opacity:0.6">(optional)</span></label><select id="new-debt-bill"><option value="">— None —</option></select></div>
-          <div class="input-group" style="min-width:170px"><label>Principal Payment Bill <span style="font-weight:400;opacity:0.6">(optional)</span></label><select id="new-debt-principal"><option value="">— None —</option></select></div>
+          <div class="input-group" style="min-width:150px"><label>Linked Bill <span style="font-weight:400;opacity:0.6">(optional)</span></label><select id="new-debt-bill" onfocus="populateDebtBillDropdowns()"><option value="">— None —</option></select></div>
+          <div class="input-group" style="min-width:170px"><label>Principal Payment Bill <span style="font-weight:400;opacity:0.6">(optional)</span></label><select id="new-debt-principal" onfocus="populateDebtBillDropdowns()"><option value="">— None —</option></select></div>
           <button class="btn btn-primary" onclick="addDebt()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Add Debt</button>
         </div>
       </div>
