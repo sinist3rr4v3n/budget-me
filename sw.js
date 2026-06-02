@@ -1,37 +1,34 @@
 // ═══════════════════════════════════════════
-//  Budget Me — Service Worker
-//  Handles offline caching & background sync
+//  Budget Me — Service Worker v2
+//  Bump CACHE_NAME version to bust old cache
 // ═══════════════════════════════════════════
 
-const CACHE_NAME = 'budgetme-v1';
-const RUNTIME_CACHE = 'budgetme-runtime-v1';
+const CACHE_NAME = 'budgetme-v2';  // ← bumped from v1 to force cache refresh
+const RUNTIME_CACHE = 'budgetme-runtime-v2';
 
-// Files to cache immediately on install (app shell)
 const PRECACHE_URLS = [
   './',
-  './BudgetMe.html',
-  // Google Fonts — cache the CSS; actual font files get cached at runtime
+  './index.html',
   'https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&display=swap',
 ];
 
-// ── INSTALL: pre-cache the app shell ──────────────────────────
+// ── INSTALL ────────────────────────────────
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => {
-        console.log('[SW] Pre-caching app shell');
-        // Add one by one so a single failure doesn't break the whole install
+        console.log('[SW v2] Pre-caching app shell');
         return Promise.allSettled(
           PRECACHE_URLS.map(url => cache.add(url).catch(err => {
-            console.warn('[SW] Failed to pre-cache:', url, err);
+            console.warn('[SW v2] Failed to pre-cache:', url, err);
           }))
         );
       })
-      .then(() => self.skipWaiting()) // Activate immediately
+      .then(() => self.skipWaiting())
   );
 });
 
-// ── ACTIVATE: clean up old caches ─────────────────────────────
+// ── ACTIVATE: wipe ALL old caches ──────────
 self.addEventListener('activate', event => {
   const validCaches = [CACHE_NAME, RUNTIME_CACHE];
   event.waitUntil(
@@ -41,51 +38,40 @@ self.addEventListener('activate', event => {
           cacheNames
             .filter(name => !validCaches.includes(name))
             .map(name => {
-              console.log('[SW] Deleting old cache:', name);
+              console.log('[SW v2] Deleting old cache:', name);
               return caches.delete(name);
             })
         )
       )
-      .then(() => self.clients.claim()) // Take control of all open tabs
+      .then(() => self.clients.claim())
   );
 });
 
-// ── FETCH: cache-first for app shell, network-first for fonts ──
+// ── FETCH ───────────────────────────────────
 self.addEventListener('fetch', event => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Skip non-GET requests and browser-extension requests
   if (request.method !== 'GET' || url.protocol === 'chrome-extension:') return;
 
-  // ── Google Fonts: stale-while-revalidate ──
   if (url.origin === 'https://fonts.googleapis.com' || url.origin === 'https://fonts.gstatic.com') {
     event.respondWith(staleWhileRevalidate(request, RUNTIME_CACHE));
     return;
   }
 
-  // ── App HTML + same-origin assets: cache-first ──
   if (url.origin === self.location.origin) {
     event.respondWith(cacheFirst(request, CACHE_NAME));
     return;
   }
 
-  // ── Everything else: network-first with cache fallback ──
   event.respondWith(networkFirst(request, RUNTIME_CACHE));
 });
 
-// ═══════════════════════════════════════════
-//  STRATEGIES
-// ═══════════════════════════════════════════
+// ── STRATEGIES ──────────────────────────────
 
-/**
- * Cache-first: serve from cache, fall back to network, then cache the result.
- * Best for the app shell (HTML, icons) — guaranteed offline access.
- */
 async function cacheFirst(request, cacheName) {
   const cached = await caches.match(request);
   if (cached) return cached;
-
   try {
     const response = await fetch(request);
     if (response.ok) {
@@ -94,15 +80,10 @@ async function cacheFirst(request, cacheName) {
     }
     return response;
   } catch {
-    // Offline and not in cache — return a simple offline page
     return offlineFallback();
   }
 }
 
-/**
- * Network-first: try network, fall back to cache.
- * Good for dynamic content where freshness matters.
- */
 async function networkFirst(request, cacheName) {
   try {
     const response = await fetch(request);
@@ -117,27 +98,18 @@ async function networkFirst(request, cacheName) {
   }
 }
 
-/**
- * Stale-while-revalidate: serve cache immediately, update in background.
- * Perfect for fonts — fast load, stays fresh over time.
- */
 async function staleWhileRevalidate(request, cacheName) {
   const cache = await caches.open(cacheName);
   const cached = await cache.match(request);
-
   const fetchPromise = fetch(request)
     .then(response => {
       if (response.ok) cache.put(request, response.clone());
       return response;
     })
     .catch(() => null);
-
   return cached || fetchPromise;
 }
 
-/**
- * Minimal offline fallback page shown when nothing is cached.
- */
 function offlineFallback() {
   return new Response(
     `<!DOCTYPE html>
