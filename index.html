@@ -5393,22 +5393,45 @@ function renderDebtProjection() {
     let interestPaid = 0;
     let paidOffMonth = null;
     const mr         = (d.rate || 0) / 100 / 12;
-    const payment    = d.minPayment || 0;
+
+    // Regular minimum payment (from linkedBillId or minPayment)
+    // Linked Bill — regular payment (interest + principal)
+    // Use the linked bill's amount if available, otherwise fall back to d.minPayment
+    const regularBill    = d.linkedBillId
+      ? STATE.bills.find(b => +b.id === +d.linkedBillId)
+      : null;
+    const regularPayment = regularBill
+      ? (+regularBill.amount || 0)
+      : (d.minPayment || 0);
+    const regularPays    = regularPayment > 0 && (
+      mode === 'every' || (mode === 'autopay' && regularBill?.autoPay)
+    );
+
+    // Linked Principal Payment Bill — extra payment 100% to principal
+    const princBill      = d.linkedPrincipalId
+      ? STATE.bills.find(b => +b.id === +d.linkedPrincipalId)
+      : null;
+    const princPayment   = princBill ? (+princBill.amount || 0) : 0;
+    const princPays      = princPayment > 0 && (
+      mode === 'every' || (mode === 'autopay' && princBill?.autoPay)
+    );
 
     for (let mo = 1; mo <= monthsAhead; mo++) {
       if (bal <= 0) break;
 
-      // Accrue interest
+      // Step 1: accrue monthly interest
       const interest = bal * mr;
       interestPaid  += interest;
       bal           += interest;
 
-      // Apply payment based on mode
-      const shouldPay = mode === 'every' || (mode === 'autopay' && d.linkedBillId &&
-        STATE.bills.find(b => +b.id === +d.linkedBillId)?.autoPay);
+      // Step 2: apply regular linked bill payment (covers interest first, rest to principal)
+      if (regularPays) {
+        bal = Math.max(0, bal - regularPayment);
+      }
 
-      if (shouldPay && payment > 0) {
-        bal = Math.max(0, bal - payment);
+      // Step 3: apply extra principal-only payment (100% straight to principal)
+      if (princPays && bal > 0) {
+        bal = Math.max(0, bal - princPayment);
       }
 
       if (bal <= 0 && paidOffMonth === null) paidOffMonth = mo;
@@ -5416,7 +5439,7 @@ function renderDebtProjection() {
 
     bal = Math.max(0, parseFloat(bal.toFixed(2)));
     const paidOff = bal === 0;
-    return { d, projBal: bal, interestPaid: parseFloat(interestPaid.toFixed(2)), paidOff, monthsPaidOff: paidOffMonth };
+    return { d, projBal: bal, interestPaid: parseFloat(interestPaid.toFixed(2)), paidOff, monthsPaidOff: paidOffMonth, regularBill, regularPayment, princBill, princPayment };
   });
 
   const months = monthsAhead;
@@ -5428,11 +5451,13 @@ function renderDebtProjection() {
       Projected balances on <strong style="color:var(--purple2)">${dateLabel}</strong>
       — ${months} month${months!==1?'s':''} from now
     </div>
-      ${results.map(({ d, projBal, interestPaid, paidOff, monthsPaidOff }) => {
-        const orig    = d.origBalance || d.balance;
-        const paid    = Math.max(0, orig - projBal);
-        const pct     = orig > 0 ? Math.min(100, (paid / orig) * 100) : 100;
-        const reduction = d.balance - projBal;
+      ${results.map(({ d, projBal, interestPaid, paidOff, monthsPaidOff, regularBill, regularPayment, princBill, princPayment }) => {
+        const orig           = d.origBalance || d.balance;
+        // Balance reduction = how much the actual balance went down
+        const balReduction   = Math.max(0, d.balance - projBal);
+        // Total paid = balance reduction + all interest paid
+        const totalPaid      = balReduction + interestPaid;
+        const pct            = orig > 0 ? Math.min(100, (balReduction / orig) * 100) : 100;
         return `<div class="debt-proj-card${paidOff ? ' paid-off' : ''}">
           <div class="debt-proj-card-header">
             <span class="debt-proj-emoji">${d.emoji || '💳'}</span>
@@ -5448,10 +5473,14 @@ function renderDebtProjection() {
             <div class="debt-proj-stat">Now: <strong>${fmt(d.balance)}</strong></div>
             ${paidOff
               ? `<div class="debt-proj-stat">Paid off in: <strong style="color:var(--teal)">${monthsPaidOff} mo</strong></div>`
-              : `<div class="debt-proj-stat">Reduced by: <strong style="color:var(--teal)">${fmt(reduction)}</strong></div>`
+              : `<div class="debt-proj-stat">Balance ↓: <strong style="color:var(--teal)">${fmt(balReduction)}</strong></div>`
             }
             <div class="debt-proj-stat">Interest: <strong style="color:var(--amber)">${fmt(interestPaid)}</strong></div>
-            <div class="debt-proj-stat">Progress: <strong>${pct.toFixed(1)}%</strong></div>
+            <div class="debt-proj-stat">Total paid: <strong>${fmt(totalPaid)}</strong></div>
+          </div>
+          <div style="margin-top:8px;font-size:10px;font-family:'IBM Plex Mono',monospace;color:var(--muted2);display:flex;gap:10px;flex-wrap:wrap">
+            ${regularBill ? `<span>💳 ${regularBill.name}: ${fmt(regularPayment)}/mo</span>` : `<span>💳 Min: ${fmt(regularPayment)}/mo</span>`}
+            ${princBill ? `<span>➕ ${princBill.name}: ${fmt(princPayment)}/mo to principal</span>` : ''}
           </div>
         </div>`;
       }).join('')}
