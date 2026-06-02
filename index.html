@@ -3136,6 +3136,7 @@ function editBill(id) {
     return;
   }
 
+  const currentEmoji = b.emoji || '📋';
   row.outerHTML = `<div class="edit-row" id="editrow-${id}" style="flex-wrap:wrap;gap:8px">
     <input type="text" id="en-${id}" value="${b.name}" placeholder="Name" style="flex:2;min-width:120px"/>
     <div class="input-wrap has-prefix" style="flex:1;min-width:100px"><span class="prefix">$</span>
@@ -3148,6 +3149,15 @@ function editBill(id) {
       <option value="yearly"   ${r==='yearly'  ?'selected':''}>🗓️ Yearly</option>
       <option value="one-time" ${r==='one-time'?'selected':''}>1× One-Time</option>
     </select>
+    <div class="debt-icon-picker-wrap" id="bill-edit-icon-wrap-${id}" style="position:relative">
+      <button type="button" class="debt-icon-btn" id="bill-edit-icon-btn-${id}"
+        onclick="toggleBillEditIconPicker(${id})"
+        style="padding:7px 10px;font-size:18px;width:auto;gap:6px">
+        <span id="bill-edit-icon-preview-${id}">${currentEmoji}</span>
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="flex-shrink:0;opacity:0.5"><polyline points="6,9 12,15 18,9"/></svg>
+      </button>
+    </div>
+    <input type="hidden" id="bill-edit-emoji-${id}" value="${currentEmoji}"/>
     <button class="btn btn-save btn-sm" onclick="saveBill(${id})">Save</button>
     <button class="btn btn-cancel btn-sm" onclick="renderBills()">Cancel</button>
   </div>`;
@@ -3203,11 +3213,11 @@ function saveBill(id) {
   const amount     = parseFloat(document.getElementById('ea-'+id).value)||0;
   const day        = parseInt(document.getElementById('ed-'+id).value)||1;
   const recurrence = document.getElementById('er-'+id).value || 'monthly';
-  b.name = name; b.amount = amount; b.day = day; b.recurrence = recurrence;
+  const emoji      = document.getElementById('bill-edit-emoji-'+id)?.value || b.emoji || '📋';
+  b.name = name; b.amount = amount; b.day = day; b.recurrence = recurrence; b.emoji = emoji;
   MONTHS.forEach(m => STATE.months[m].weeks.forEach(w => {
-    // Match by old name OR by id to correctly find week copies
     const wb = w.bills.find(x=>x.name===oldName||+x.id===id);
-    if (wb) { wb.name=name; wb.amount=amount; wb.day=day; wb.recurrence=recurrence; }
+    if (wb) { wb.name=name; wb.amount=amount; wb.day=day; wb.recurrence=recurrence; wb.emoji=emoji; }
   }));
   saveState(); renderBills();
 }
@@ -3269,6 +3279,7 @@ function _closePortal() {
 
 function _currentPortalEmoji() {
   if (_iconPortalMode === 'bill')     return document.getElementById('new-bill-emoji')?.value || '📋';
+  if (_iconPortalMode === 'billEdit') return document.getElementById('bill-edit-emoji-'+_iconPortalIndex)?.value || '📋';
   if (_iconPortalMode === 'debt')     return document.getElementById('new-debt-emoji')?.value || '💳';
   if (_iconPortalMode === 'debtEdit') return document.getElementById('debt-ne-'+_iconPortalIndex)?.value || '💳';
   return '';
@@ -3310,6 +3321,10 @@ function _pickPortalIcon(ic) {
   if (_iconPortalMode === 'bill') {
     document.getElementById('new-bill-emoji').value = ic;
     document.getElementById('bill-icon-preview').textContent = ic;
+  } else if (_iconPortalMode === 'billEdit') {
+    const i = _iconPortalIndex;
+    document.getElementById('bill-edit-emoji-'+i).value = ic;
+    document.getElementById('bill-edit-icon-preview-'+i).textContent = ic;
   } else if (_iconPortalMode === 'debt') {
     document.getElementById('new-debt-emoji').value = ic;
     document.getElementById('debt-icon-preview').textContent = ic;
@@ -3325,7 +3340,7 @@ function _pickPortalIcon(ic) {
 document.addEventListener('mousedown', function(e) {
   if (!_iconPortalOpen) return;
   const p = _getPortal();
-  if (!p.contains(e.target) && !e.target.closest('.debt-icon-picker-wrap') && !e.target.closest('[id^="debt-edit-icon-wrap"]')) {
+  if (!p.contains(e.target) && !e.target.closest('.debt-icon-picker-wrap') && !e.target.closest('[id^="debt-edit-icon-wrap"]') && !e.target.closest('[id^="bill-edit-icon-wrap"]')) {
     _closePortal();
   }
 });
@@ -3341,6 +3356,26 @@ function toggleBillIconPicker() {
 }
 function filterBillIcons() { filterPortalIcons(); }
 function pickBillIcon(ic)   { _pickPortalIcon(ic); _billIconOpen = false; }
+
+// ── Bill edit icon picker (per-bill in edit row) ──
+let _billEditIconId = null;
+function toggleBillEditIconPicker(id) {
+  if (_iconPortalOpen && _iconPortalMode === 'billEdit' && _billEditIconId === id) {
+    _closePortal(); return;
+  }
+  _billEditIconId = id;
+  _iconPortalMode = 'billEdit';
+  _iconPortalIndex = id;
+  const p   = _getPortal();
+  const btn = document.getElementById('bill-edit-icon-btn-' + id);
+  if (!btn) return;
+  _positionPortal(btn);
+  p.style.display = 'flex';
+  _iconPortalOpen = true;
+  document.getElementById('portal-icon-search').value = '';
+  _buildPortalGrid('');
+  setTimeout(() => document.getElementById('portal-icon-search')?.focus(), 40);
+}
 
 function toggleDebtIconPicker() {
   if (_iconPortalOpen && _iconPortalMode === 'debt') { _closePortal(); _debtIconOpen = false; return; }
