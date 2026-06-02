@@ -2134,92 +2134,190 @@ function buildInitial() {
   };
 }
 
-function loadState() {
-  try {
-    // Try localStorage first, fall back to sessionStorage for migration
-    const raw = localStorage.getItem('bm2026') || sessionStorage.getItem('bm2026');
-    if (raw) {
-      const s = JSON.parse(raw);
-      if (!s.cfg) s.cfg = { year:2026, payFreq:'biweekly', payDow:5, anchorDate:'2026-01-02', customDays:'', savingsBalance: s.savingsBalance||7463.81 };
-      if (!s.cards) {
-        s.cards = [{ id:50, name:"Venture Card", type:"Capital One Rewards", limit:0, color:0, expenses: (s.venture||DEF_VENTURE).map(e=>({...e})) }];
-        s.activeCardId = 50;
-      }
-      if (!s.activeCardId) s.activeCardId = s.cards[0]?.id || 50;
-      if (!s.goals) s.goals = [];
-      if (!s.debts) s.debts = [];
-      if (!s.netWorthAssets) s.netWorthAssets = [];
-      if (!s.netWorthLiabilities) s.netWorthLiabilities = [];
-      if (!s.incomeStreams) s.incomeStreams = [];
-      // Migrate autoPay field onto bills if missing
-      s.bills.forEach(b => {
-        if (b.autoPay === undefined) b.autoPay = false;
-        if (b.recurrence === undefined) b.recurrence = 'monthly';
-      });
-      // Ensure week bills also have autoPay mirrored from master list
-      MONTHS.forEach(m => {
-        (s.months[m]?.weeks||[]).forEach(w => {
-          w.bills.forEach(wb => {
-            const master = s.bills.find(b => b.name === wb.name);
-            if (master) { wb.autoPay = master.autoPay; if (master.autoPay) wb.paid = true; }
-            else if (wb.autoPay === undefined) wb.autoPay = false;
-          });
-          // Migrate incomeStreams array on weeks
-          if (!w.incomeStreams) w.incomeStreams = [];
-        });
-      });
+// ═══════════════════════════════════════════
+//  STORAGE — IndexedDB with localStorage fallback
+//  IndexedDB survives cache clears and PWA reinstalls.
+//  localStorage is kept as a write-through mirror so
+//  old code paths and export/import keep working.
+// ═══════════════════════════════════════════
 
-      // ── REPAIR DUPLICATE IDs ──
-      // Reassign any master bill whose ID collides with another object
-      (function repairDuplicateIds() {
-        const usedIds = new Set();
+const DB_NAME    = 'BudgetMeDB';
+const DB_VERSION = 1;
+const STORE_NAME = 'state';
+const STATE_KEY  = 'bm2026';
+
+let _db = null; // IndexedDB connection, set during init
+
+function _openDB() {
+  return new Promise((resolve, reject) => {
+    if (_db) { resolve(_db); return; }
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = e => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME);
+      }
+    };
+    req.onsuccess = e => { _db = e.target.result; resolve(_db); };
+    req.onerror   = e => reject(e.target.error);
+  });
+}
+
+function _idbGet(key) {
+  return _openDB().then(db => new Promise((resolve, reject) => {
+    const tx  = db.transaction(STORE_NAME, 'readonly');
+    const req = tx.objectStore(STORE_NAME).get(key);
+    req.onsuccess = e => resolve(e.target.result);
+    req.onerror   = e => reject(e.target.error);
+  }));
+}
+
+function _idbPut(key, value) {
+  return _openDB().then(db => new Promise((resolve, reject) => {
+    const tx  = db.transaction(STORE_NAME, 'readwrite');
+    const req = tx.objectStore(STORE_NAME).put(value, key);
+    req.onsuccess = () => resolve();
+    req.onerror   = e => reject(e.target.error);
+  }));
+}
+
+function _idbDelete(key) {
+  return _openDB().then(db => new Promise((resolve, reject) => {
+    const tx  = db.transaction(STORE_NAME, 'readwrite');
+    const req = tx.objectStore(STORE_NAME).delete(key);
+    req.onsuccess = () => resolve();
+    req.onerror   = e => reject(e.target.error);
+  }));
+}
+
+// ── Migrate a raw state object (validation + field additions) ──
+function _migrateState(s) {
+  if (!s.cfg) s.cfg = { year:2026, payFreq:'biweekly', payDow:5, anchorDate:'2026-01-02', customDays:'', savingsBalance: s.savingsBalance||7463.81 };
+  if (!s.cards) {
+    s.cards = [{ id:50, name:"Venture Card", type:"Capital One Rewards", limit:0, color:0, expenses: (s.venture||DEF_VENTURE).map(e=>({...e})) }];
+    s.activeCardId = 50;
+  }
+  if (!s.activeCardId) s.activeCardId = s.cards[0]?.id || 50;
+  if (!s.goals)               s.goals = [];
+  if (!s.debts)               s.debts = [];
+  if (!s.netWorthAssets)      s.netWorthAssets = [];
+  if (!s.netWorthLiabilities) s.netWorthLiabilities = [];
+  if (!s.incomeStreams)        s.incomeStreams = [];
+
+  s.bills.forEach(b => {
+    if (b.autoPay   === undefined) b.autoPay   = false;
+    if (b.recurrence === undefined) b.recurrence = 'monthly';
+  });
+
+  MONTHS.forEach(m => {
+    (s.months[m]?.weeks||[]).forEach(w => {
+      w.bills.forEach(wb => {
+        const master = s.bills.find(b => b.name === wb.name);
+        if (master) { wb.autoPay = master.autoPay; if (master.autoPay) wb.paid = true; }
+        else if (wb.autoPay === undefined) wb.autoPay = false;
+      });
+      if (!w.incomeStreams) w.incomeStreams = [];
+    });
+  });
+
+  // Repair duplicate IDs
+  (function repairDuplicateIds() {
+    const usedIds = new Set();
+    MONTHS.forEach(m => {
+      (s.months[m]?.weeks||[]).forEach(w => {
+        usedIds.add(+w.id);
+        w.bills.forEach(wb => usedIds.add(+wb.id));
+      });
+    });
+    (s.goals||[]).forEach(g => usedIds.add(+g.id));
+    (s.debts||[]).forEach(d => usedIds.add(+d.id));
+    (s.netWorthAssets||[]).forEach(a => usedIds.add(+a.id));
+    (s.netWorthLiabilities||[]).forEach(l => usedIds.add(+l.id));
+    (s.cards||[]).forEach(c => usedIds.add(+c.id));
+
+    let maxId = 200;
+    usedIds.forEach(id => { if (isFinite(id) && id > maxId) maxId = id; });
+    s.bills.forEach(b => { if (isFinite(+b.id) && +b.id > maxId) maxId = +b.id; });
+
+    const billIdsSeen = new Set();
+    s.bills.forEach(b => {
+      const oldId = +b.id;
+      if (usedIds.has(oldId) || billIdsSeen.has(oldId)) {
+        maxId += 1;
+        b.id = maxId;
         MONTHS.forEach(m => {
           (s.months[m]?.weeks||[]).forEach(w => {
-            usedIds.add(+w.id);
-            w.bills.forEach(wb => usedIds.add(+wb.id));
+            w.bills.forEach(wb => { if (+wb.id === oldId || wb.name === b.name) wb.id = maxId; });
           });
         });
-        (s.goals||[]).forEach(g => usedIds.add(+g.id));
-        (s.debts||[]).forEach(d => usedIds.add(+d.id));
-        (s.netWorthAssets||[]).forEach(a => usedIds.add(+a.id));
-        (s.netWorthLiabilities||[]).forEach(l => usedIds.add(+l.id));
-        (s.cards||[]).forEach(c => usedIds.add(+c.id));
+      }
+      billIdsSeen.add(+b.id);
+    });
+  })();
 
-        let maxId = 200;
-        usedIds.forEach(id => { if (isFinite(id) && id > maxId) maxId = id; });
-        s.bills.forEach(b => { if (isFinite(+b.id) && +b.id > maxId) maxId = +b.id; });
+  return s;
+}
 
-        const billIdsSeen = new Set();
-        s.bills.forEach(b => {
-          const oldId = +b.id;
-          if (usedIds.has(oldId) || billIdsSeen.has(oldId)) {
-            maxId += 1;
-            const newId = maxId;
-            b.id = newId;
-            MONTHS.forEach(m => {
-              (s.months[m]?.weeks||[]).forEach(w => {
-                w.bills.forEach(wb => {
-                  if (+wb.id === oldId || wb.name === b.name) wb.id = newId;
-                });
-              });
-            });
-          }
-          billIdsSeen.add(+b.id);
-        });
-      })();
-
-      return s;
-    }
+// ── Synchronous load: reads from localStorage (always available immediately) ──
+// IndexedDB is async so we bootstrap from localStorage on first load,
+// then IndexedDB takes over as the primary store going forward.
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STATE_KEY) || sessionStorage.getItem(STATE_KEY);
+    if (raw) return _migrateState(JSON.parse(raw));
   } catch {}
   return buildInitial();
 }
+
+// ── saveState: writes to BOTH IndexedDB (primary) and localStorage (mirror) ──
+// The localStorage mirror means export/import and the sync checks keep working.
+let _saveQueued = false;
 function saveState() {
-  try { localStorage.setItem('bm2026', JSON.stringify(STATE)); } catch {}
+  // Write to localStorage synchronously (instant, always works)
+  try { localStorage.setItem(STATE_KEY, JSON.stringify(STATE)); } catch {}
+
+  // Write to IndexedDB asynchronously (debounced to avoid hammering on rapid changes)
+  if (!_saveQueued) {
+    _saveQueued = true;
+    setTimeout(() => {
+      _saveQueued = false;
+      _idbPut(STATE_KEY, JSON.stringify(STATE)).catch(() => {});
+    }, 300);
+  }
 }
 
-let STATE = loadState();
-// Sync nextId to avoid ID collisions with data already in STATE
-(function syncNextId() {
+// ── Boot: open IndexedDB and check if it has newer data than localStorage ──
+// This runs async after STATE is already loaded from localStorage.
+// If IDB has data, it wins (it's more durable).
+async function _initStorage() {
+  try {
+    const idbRaw = await _idbGet(STATE_KEY);
+    if (idbRaw) {
+      // IDB has data — use it as the authoritative source
+      const idbState = _migrateState(JSON.parse(idbRaw));
+      // Only switch to IDB version if it looks valid
+      if (idbState.bills && idbState.months) {
+        // Overwrite STATE in-place
+        Object.keys(STATE).forEach(k => delete STATE[k]);
+        Object.assign(STATE, idbState);
+        // Re-sync nextId
+        _syncNextId();
+        syncCardBills();
+        // Mirror to localStorage
+        try { localStorage.setItem(STATE_KEY, JSON.stringify(STATE)); } catch {}
+        console.log('[Storage] Loaded from IndexedDB ✓');
+        return;
+      }
+    }
+    // IDB is empty — migrate localStorage data into it now
+    await _idbPut(STATE_KEY, JSON.stringify(STATE));
+    console.log('[Storage] Migrated localStorage → IndexedDB ✓');
+  } catch(e) {
+    console.warn('[Storage] IndexedDB init error (falling back to localStorage):', e);
+  }
+}
+
+function _syncNextId() {
   const allIds = [];
   STATE.bills.forEach(b => allIds.push(b.id));
   (STATE.goals||[]).forEach(g => allIds.push(g.id));
@@ -2232,11 +2330,17 @@ let STATE = loadState();
   }));
   const maxId = allIds.filter(x => typeof x === 'number' && isFinite(x)).reduce((a,b) => Math.max(a,b), nextId);
   if (maxId > nextId) nextId = maxId;
-})();
-// Write repaired state back to localStorage so any fixed IDs are persisted immediately
-try { localStorage.setItem('bm2026', JSON.stringify(STATE)); } catch {}
-// Sync any credit card bills on startup
+}
+
+let STATE = loadState();
+_syncNextId();
+// Write repaired state back immediately
+try { localStorage.setItem(STATE_KEY, JSON.stringify(STATE)); } catch {}
+// Sync credit card bills on startup
 syncCardBills();
+// Kick off async IndexedDB init (runs in background, doesn't block render)
+_initStorage();
+
 let activePage = 'dashboard';
 let activeMonth = 'Jan';
 
@@ -3322,19 +3426,14 @@ function importBackup(input){
     try{
       const data=JSON.parse(e.target.result);
       if(!data.months||!data.bills)throw new Error('invalid');
-      localStorage.setItem('bm2026',JSON.stringify(data));
-      // location.reload() blocked in sandboxed iframes — rebuild state in-place
-      STATE = loadState();
+      // Write to both localStorage and IndexedDB
+      const serialized = JSON.stringify(data);
+      try { localStorage.setItem(STATE_KEY, serialized); } catch(e) {}
+      _idbPut(STATE_KEY, serialized).catch(()=>{});
+      // Rebuild state in-place
+      STATE = _migrateState(data);
       nextId = 200;
-      (function syncId(){
-        const allIds=[];
-        STATE.bills.forEach(b=>allIds.push(+b.id));
-        (STATE.goals||[]).forEach(g=>allIds.push(+g.id));
-        (STATE.debts||[]).forEach(d=>allIds.push(+d.id));
-        MONTHS.forEach(m=>(STATE.months[m]?.weeks||[]).forEach(w=>{allIds.push(+w.id);w.bills.forEach(b=>allIds.push(+b.id));}));
-        const mx=allIds.filter(x=>isFinite(x)).reduce((a,b)=>Math.max(a,b),200);
-        if(mx>nextId)nextId=mx;
-      })();
+      _syncNextId();
       syncCardBills();
       showPage('dashboard', document.querySelector('.nav-item'));
       document.querySelectorAll('.nav-item').forEach((n,i) => n.classList.toggle('active', i===0));
@@ -3391,15 +3490,18 @@ function clearAllData(){
 
 function confirmClearAllData(){
   try {
-    localStorage.removeItem('bm2026');
+    localStorage.removeItem(STATE_KEY);
     localStorage.removeItem('bm2026-last-reset');
     localStorage.removeItem('bm2026-debt-processed');
     localStorage.removeItem('bm2026-stmt-processed');
   } catch(e) {}
-  // location.reload() blocked in sandboxed iframes — rebuild state in-place
+  // Also wipe IndexedDB
+  _idbDelete(STATE_KEY).catch(()=>{});
+  // Rebuild state in-place
   STATE = buildInitial();
   nextId = 200;
   syncCardBills();
+  saveState();
   const modal = document.getElementById('clear-data-modal');
   if (modal) modal.remove();
   showPage('dashboard', document.querySelector('.nav-item'));
