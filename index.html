@@ -5200,13 +5200,13 @@ function removeNWItem(type,idx){
 function populateDebtBillDropdowns() {
   try {
     const bills = STATE.bills || [];
-    if (!bills.length) return; // nothing to populate, leave — None — as-is
     const opts = '<option value="">— None —</option>' +
       bills.map(b => `<option value="${b.id}">${b.emoji||'📋'} ${b.name} ($${(+(b.amount)||0).toFixed(2)})</option>`).join('');
     const billSel = document.getElementById('new-debt-bill');
     const principalSel = document.getElementById('new-debt-principal');
-    if (billSel) billSel.innerHTML = opts;
-    if (principalSel) principalSel.innerHTML = opts;
+    if (billSel) { billSel.innerHTML = opts; }
+    if (principalSel) { principalSel.innerHTML = opts; }
+    console.log('[BudgetMe] Debt dropdowns populated with', bills.length, 'bills');
   } catch(e) { console.warn('[BudgetMe] populateDebtBillDropdowns error:', e); }
 }
 
