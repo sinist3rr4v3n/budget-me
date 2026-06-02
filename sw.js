@@ -3,8 +3,8 @@
 //  Bump CACHE_NAME version to bust old cache
 // ═══════════════════════════════════════════
 
-const CACHE_NAME = 'budgetme-v5';  // ← bumped from v1 to force cache refresh
-const RUNTIME_CACHE = 'budgetme-runtime-v5';
+const CACHE_NAME = 'budgetme-v6';  // ← bumped from v1 to force cache refresh
+const RUNTIME_CACHE = 'budgetme-runtime-v6';
 
 const PRECACHE_URLS = [
   './',
